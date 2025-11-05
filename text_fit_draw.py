@@ -15,12 +15,14 @@ def draw_text_auto(
     color: Tuple[int, int, int] = (0, 0, 0),
     max_font_height: int | None = None,
     font_path: str | None = None,
-    align: Align = "center",      # 新增：水平对齐（逐行生效）
-    valign: VAlign = "middle",       # 新增：垂直对齐
-    line_spacing: float = 0.15,   # 新增：额外行距比例
+    align: Align = "center",
+    valign: VAlign = "middle",
+    line_spacing: float = 0.15,
+    bracket_color: Tuple[int, int, int] = (128, 0, 128),  # 中括号及内部内容颜色
 ) -> bytes:
     """
-    在指定矩形内自适应字号绘制文本；逐行居中/对齐可控，返回 PNG 字节。
+    在指定矩形内自适应字号绘制文本；
+    中括号及括号内文字使用 bracket_color。
     """
 
     # --- 1. 打开图像 ---
@@ -45,28 +47,28 @@ def draw_text_auto(
         except Exception:
             return ImageFont.load_default()
 
-    # --- 3. 文本包行（给定字号、最大宽）---
+    # --- 3. 文本包行 ---
     def wrap_lines(txt: str, font: ImageFont.FreeTypeFont, max_w: int) -> list[str]:
         lines: list[str] = []
         for para in txt.splitlines() or [""]:
-            # 有空格则按词，否则按字符（适配中文）
             has_space = (" " in para)
             units = para.split(" ") if has_space else list(para)
             buf = ""
+
             def unit_join(a: str, b: str) -> str:
-                if not a: return b
+                if not a:
+                    return b
                 return (a + " " + b) if has_space else (a + b)
 
             for u in units:
                 trial = unit_join(buf, u)
-                w = draw.textlength(trial, font=font)  # 更稳的宽度估计
+                w = draw.textlength(trial, font=font)
                 if w <= max_w:
                     buf = trial
                 else:
                     if buf:
-                        lines.append(buf)  # 已满，先收一行
+                        lines.append(buf)
                     if has_space and len(u) > 1:
-                        # 过长单词按字符强拆（你的原逻辑保留）
                         tmp = ""
                         for ch in u:
                             if draw.textlength(tmp + ch, font=font) <= max_w:
@@ -77,20 +79,18 @@ def draw_text_auto(
                                 tmp = ch
                         buf = tmp
                     else:
-                        # ✅ 不要把 u 直接 append 成一整行；把它作为新行的开始
                         if draw.textlength(u, font=font) <= max_w:
                             buf = u
                         else:
-                            # 只有在字符本身都比行宽还宽时，才单独成行
                             lines.append(u)
                             buf = ""
             if buf != "":
                 lines.append(buf)
             if para == "" and (not lines or lines[-1] != ""):
-                lines.append("")  # 保留显式空行
+                lines.append("")
         return lines
 
-    # --- 4. 测量一组行的整体尺寸 ---
+    # --- 4. 测量 ---
     def measure_block(lines: list[str], font: ImageFont.FreeTypeFont) -> tuple[int, int, int]:
         ascent, descent = font.getmetrics()
         line_h = int((ascent + descent) * (1 + line_spacing))
@@ -116,7 +116,6 @@ def draw_text_auto(
             hi = mid - 1
 
     if best_size == 0:
-        # 极端情况下退化：1 像素字体
         font = _load_font(1)
         best_lines = wrap_lines(text, font, region_w)
         _, best_block_h, best_line_h = 0, 1, 1
@@ -124,15 +123,39 @@ def draw_text_auto(
     else:
         font = _load_font(best_size)
 
-    # --- 6. 计算块的起始 y（垂直对齐） ---
+    # --- 6. 解析着色片段 ---
+    def parse_color_segments(s: str) -> list[tuple[str, Tuple[int, int, int]]]:
+        segs: list[tuple[str, Tuple[int, int, int]]] = []
+        buf = ""
+        in_bracket = False
+        for ch in s:
+            if ch == "[" or ch == "【":
+                if buf:
+                    segs.append((buf, bracket_color if in_bracket else color))
+                    buf = ""
+                segs.append(("[", bracket_color))
+                in_bracket = True
+            elif ch == "]" or ch == "】":
+                if buf:
+                    segs.append((buf, bracket_color))
+                    buf = ""
+                segs.append(("]", bracket_color))
+                in_bracket = False
+            else:
+                buf += ch
+        if buf:
+            segs.append((buf, bracket_color if in_bracket else color))
+        return segs
+
+    # --- 7. 垂直对齐 ---
     if valign == "top":
         y_start = y1
     elif valign == "middle":
         y_start = y1 + (region_h - best_block_h) // 2
-    else:  # bottom
+    else:
         y_start = y2 - best_block_h
 
-    # --- 7. 逐行绘制（关键：每行单独水平对齐） ---
+    # --- 8. 绘制 ---
     y = y_start
     for ln in best_lines:
         line_w = int(draw.textlength(ln, font=font))
@@ -140,14 +163,18 @@ def draw_text_auto(
             x = x1
         elif align == "center":
             x = x1 + (region_w - line_w) // 2
-        else:  # right
+        else:
             x = x2 - line_w
-        draw.text((x, y), ln, font=font, fill=color)
+
+        for seg_text, seg_color in parse_color_segments(ln):
+            if seg_text:
+                draw.text((x, y), seg_text, font=font, fill=seg_color)
+                x += int(draw.textlength(seg_text, font=font))
         y += best_line_h
         if y - y_start > region_h:
             break
 
-    # --- 8. 导出 PNG 字节 ---
+    # --- 9. 输出 PNG ---
     buf = BytesIO()
     img.save(buf, format="PNG")
     return buf.getvalue()
