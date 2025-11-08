@@ -1,11 +1,9 @@
-name: Build EXE
+name: Build EXE on action branch
 
 on:
   push:
-    branches: [ main, master ]
-  pull_request:
-    branches: [ main, master ]
-  workflow_dispatch:
+    branches: [ action ] 
+  workflow_dispatch: 
 
 jobs:
   build:
@@ -18,7 +16,7 @@ jobs:
     - name: Set up Python
       uses: actions/setup-python@v5
       with:
-        python-version: '3.13.9'
+        python-version: '3.11'
 
     - name: Install dependencies
       run: |
@@ -28,9 +26,23 @@ jobs:
 
     - name: Build with PyInstaller
       run: |
-        pyinstaller --onefile --noconfirm --clean main.py
-    - name: Upload artifact
+        pyinstaller --onefile --noconfirm --clean --windowed ^
+          --add-data "BaseImages;BaseImages" ^
+          --add-data "font.ttf;." ^
+          --add-data "config.py;." ^
+          main.py
+
+    - name: Package as ZIP
+      run: |
+        $branch = "${{ github.ref_name }}"
+        $sha = "${{ github.sha }}"
+        $zipName = "AnAn_Sketchbook_${branch}_${sha:0:7}.zip"
+        Compress-Archive -Path "dist\main.exe", "BaseImages", "font.ttf", "config.py" -DestinationPath $zipName
+        echo "ZIP_NAME=$zipName" | Out-File -FilePath $env:GITHUB_ENV -Append
+
+    - name: Upload Artifact
       uses: actions/upload-artifact@v4
       with:
-        name: dist-exe
-        path: dist/
+        name: Sketchbook-Build-${{ github.run_number }}
+        path: ${{ env.ZIP_NAME }}
+        retention-days: 7
