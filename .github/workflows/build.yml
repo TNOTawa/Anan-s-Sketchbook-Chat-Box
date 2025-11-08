@@ -16,7 +16,7 @@ jobs:
     - name: Set up Python
       uses: actions/setup-python@v5
       with:
-        python-version: '3.11'
+        python-version: '3.13.9'
 
     - name: Install dependencies
       run: |
@@ -26,11 +26,7 @@ jobs:
 
     - name: Build with PyInstaller
       run: |
-        pyinstaller --onefile --noconfirm --clean --windowed ^
-          --add-data "BaseImages;BaseImages" ^
-          --add-data "font.ttf;." ^
-          --add-data "config.py;." ^
-          main.py
+        pyinstaller --onefile --noconfirm --clean --windowed --add-data "BaseImages;BaseImages" --add-data "font.ttf;." --add-data "config.py;." main.py
 
     - name: Package as ZIP
       run: |
@@ -45,4 +41,3 @@ jobs:
       with:
         name: Sketchbook-Build-${{ github.run_number }}
         path: ${{ env.ZIP_NAME }}
-        retention-days: 7
