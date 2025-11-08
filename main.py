@@ -9,10 +9,12 @@ import win32gui
 import win32process
 import psutil
 from typing import Optional, Tuple
-from config import DELAY, FONT_FILE, BASEIMAGE_FILE, AUTO_SEND_IMAGE, AUTO_PASTE_IMAGE, BLOCK_HOTKEY, HOTKEY, SEND_HOTKEY,PASTE_HOTKEY,CUT_HOTKEY,SELECT_ALL_HOTKEY,TEXT_BOX_TOPLEFT,IMAGE_BOX_BOTTOMRIGHT,BASE_OVERLAY_FILE,USE_BASE_OVERLAY, ALLOWED_PROCESSES
+from config import DELAY, FONT_FILE, BASEIMAGE_MAPPING, BASEIMAGE_FILE, AUTO_SEND_IMAGE, AUTO_PASTE_IMAGE, BLOCK_HOTKEY, HOTKEY, SEND_HOTKEY, PASTE_HOTKEY, CUT_HOTKEY, SELECT_ALL_HOTKEY, TEXT_BOX_TOPLEFT, IMAGE_BOX_BOTTOMRIGHT, BASE_OVERLAY_FILE, USE_BASE_OVERLAY, ALLOWED_PROCESSES
 
 from text_fit_draw import draw_text_auto
 from image_fit_paste import paste_image_auto
+
+current_image_file = BASEIMAGE_FILE
 
 def get_foreground_window_process_name():
     """
@@ -40,7 +42,6 @@ def copy_png_bytes_to_clipboard(png_bytes: bytes):
     win32clipboard.EmptyClipboard()
     win32clipboard.SetClipboardData(win32clipboard.CF_DIB, bmp_data)
     win32clipboard.CloseClipboard()
-
 
 def get_clipboard_text_and_image() -> Tuple[str, Optional[Image.Image], object]:
     """
@@ -108,7 +109,7 @@ def process_text_and_image(text: str, image: Optional[Image.Image]) -> Optional[
         print("Get image only")
         try:
             return paste_image_auto(
-                image_source=BASEIMAGE_FILE,
+                image_source=current_image_file,
                 image_overlay=BASE_OVERLAY_FILE if USE_BASE_OVERLAY else None,
                 top_left=(x1, y1),
                 bottom_right=(x2, y2),
@@ -128,7 +129,7 @@ def process_text_and_image(text: str, image: Optional[Image.Image]) -> Optional[
         print("Get text only: " + text)
         try:
             return draw_text_auto(
-                image_source=BASEIMAGE_FILE,
+                image_source=current_image_file,
                 image_overlay=BASE_OVERLAY_FILE if USE_BASE_OVERLAY else None,
                 top_left=(x1, y1),
                 bottom_right=(x2, y2),
@@ -162,7 +163,7 @@ def process_text_and_image(text: str, image: Optional[Image.Image]) -> Optional[
                 
                 # 先绘制左半部分的图像
                 intermediate_bytes = paste_image_auto(
-                    image_source=BASEIMAGE_FILE,
+                    image_source=current_image_file,
                     image_overlay=None,  # 暂时不应用overlay
                     top_left=(x1, y1),
                     bottom_right=(left_region_right, y2),
@@ -203,7 +204,7 @@ def process_text_and_image(text: str, image: Optional[Image.Image]) -> Optional[
                 
                 # 先绘制图像
                 intermediate_bytes = paste_image_auto(
-                    image_source=BASEIMAGE_FILE,
+                    image_source=current_image_file,
                     image_overlay=None,  # 暂时不应用overlay
                     top_left=(x1, y1),
                     bottom_right=(x2, image_region_bottom),
@@ -234,6 +235,8 @@ def process_text_and_image(text: str, image: Optional[Image.Image]) -> Optional[
             return None
 
 def Start():
+    global current_image_file
+    
     # 检查是否设置了允许的进程列表，如果设置了，则检查当前进程是否在允许列表中
     if ALLOWED_PROCESSES:
         current_process = get_foreground_window_process_name()
@@ -251,6 +254,14 @@ def Start():
     if text == "" and image is None:
         print("no text or image")
         return
+    
+    # 查找发送内容是否包含更换差分指令#差分名#，如果有则更换差分并移除关键字
+    for keyword, img_file in BASEIMAGE_MAPPING.items():
+        if keyword in text:
+            current_image_file = img_file
+            text = text.replace(keyword, "").strip()
+            print(f"检测到关键词 '{keyword}'，使用底图: {current_image_file}")
+            break
     
     png_bytes = process_text_and_image(text, image)
     
@@ -273,14 +284,11 @@ def Start():
     
     print("Generate image successed!")
 
-
-    
-
 # 绑定 Ctrl+Alt+H 作为全局热键
-ok=keyboard.add_hotkey(HOTKEY, Start, suppress=BLOCK_HOTKEY or HOTKEY==SEND_HOTKEY)
+ok = keyboard.add_hotkey(HOTKEY, Start, suppress=BLOCK_HOTKEY or HOTKEY==SEND_HOTKEY)
 
 print("Starting...")
-print("Hot key bind: "+str(bool(ok)))
+print("Hot key bind: " + str(bool(ok)))
 print("Allowed processes: " + str(ALLOWED_PROCESSES))
 
 # 保持程序运行
